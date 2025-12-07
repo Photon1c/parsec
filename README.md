@@ -1,4 +1,4 @@
-#🚔 PARSEC
+# 🔎🚔👣 PARSEC
 ### Parallel Agents for Rapid Scene & Evidentiary Context
 
 > **Task-parallelized multi-agent crime-scene reconstruction system**  
