@@ -1,4 +1,4 @@
-# 🚔 PARSEC
+# 🤖🎥🕵️‍♂️: PARSEC
 
 ### Parallel Agents for Rapid Scene & Evidentiary Context
 
@@ -10,6 +10,7 @@
 
 A multi-agent system for generating educational crime reconstruction videos from police blotter text or radio logs using parallel AI processing.
 
+### ❗ For Pre-vis purposes only
 ---
 
 ## 📁 Project Structure
