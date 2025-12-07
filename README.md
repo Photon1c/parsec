@@ -1,37 +1,14 @@
-# 🔎🚔👣 PARSEC
+# 🚔 PARSEC
+
 ### Parallel Agents for Rapid Scene & Evidentiary Context
 
 > **Task-parallelized multi-agent crime-scene reconstruction system**  
 > One case → dozens of specialized AI agents running concurrently → auditable pre-vis + provenance in <60 seconds.
 
+> [!WARNING]
+> **ALL OUTPUTS ARE AI-GENERATED SIMULATIONS FOR TRAINING & INTERNAL HYPOTHESIS DEVELOPMENT ONLY — NOT EVIDENCE**
+
 A multi-agent system for generating educational crime reconstruction videos from police blotter text or radio logs using parallel AI processing.
-
-<br>
-
-<div align="center">
-
-<br>
-
-<div align="center">
-
-**⚠️ LEGAL & ETHICAL COMPLIANCE SUMMARY ⚠️**
-
-| Requirement                       | PARSEC Safeguard                                                                                 | Standard / Authority                     |
-|-----------------------------------|--------------------------------------------------------------------------------------------------|------------------------------------------|
-| **Purpose**                       | Training & internal hypothesis development **only**                                              | Non-evidentiary by design                |
-| **Court Admissibility**           | **NOT admissible as evidence** — ever                                                            | FRE 403 / Daubert / NIST IR 8401         |
-| **Visible Disclaimer**            | Permanent on-screen watermark + filename prefix `SIMULATION_NOT_EVIDENCE_`                       | Every frame & file                       |
-| **Provenance**                    | Full JSON audit trail with hashes, timestamps, model versions, user acknowledgments              | NIST AI RMF / ISO 42001                  |
-| **Human Oversight**               | 3 mandatory human-in-the-loop checkpoints                                                        | NIST AI RMF Govern 6.2                   |
-| **Bias & Sensitivity**            | Dedicated Critic Agent + safe-mode certification                                                 | NIST AI RMF Measure 2.9                  |
-| **Witness/Public Exposure**       | Prohibited — export locked until “Internal Use Only” affirmed                                    | Prevents memory contamination            |
-| **License**                       | Reconstruction-Only License v1.0 — removing disclaimers = misuse                                 | Custom restrictive license               |
-
-<strong>By using PARSEC you certify compliance with the above restrictions.</strong>
-
-</div>
-
-<br>
 
 ---
 
@@ -57,14 +34,16 @@ parallel_agents/
 The flagship implementation featuring a complete LangGraph-orchestrated multi-agent pipeline for transforming police blotter text into educational reconstruction videos.
 
 #### Features
+
 - **6 Specialized AI Agents:**
-  | Agent | Purpose |
-  |-------|---------|
-  | **Transcript Agent** | Converts police codes (10-codes) into narrative dialogue |
-  | **Scene Breakdown Agent** | Analyzes transcript and breaks into 3-5 key scenes |
-  | **Visual Reconstruction Agents** (×3) | Generate multi-angle visual prompts in parallel |
-  | **Synthesis Agent** | Merges outputs into cohesive video script |
-  | **Critic Agent** | Reviews for accuracy, sensitivity, and legal compliance |
+
+| Agent | Purpose |
+|-------|---------|
+| **Transcript Agent** | Converts police codes (10-codes) into narrative dialogue |
+| **Scene Breakdown Agent** | Analyzes transcript and breaks into 3-5 key scenes |
+| **Visual Reconstruction Agents** (×3) | Generate multi-angle visual prompts in parallel |
+| **Synthesis Agent** | Merges outputs into cohesive video script |
+| **Critic Agent** | Reviews for accuracy, sensitivity, and legal compliance |
 
 - **Parallel Processing:** Uses `asyncio` with semaphore-controlled concurrency (max 3 parallel visual agents)
 - **Human-in-the-Loop:** 3 mandatory confirmation checkpoints
@@ -72,6 +51,7 @@ The flagship implementation featuring a complete LangGraph-orchestrated multi-ag
 - **Legal Compliance:** License acceptance, watermarks, safe filenames
 
 #### Usage
+
 ```bash
 # Basic usage with blotter text
 python parallel_test1.py --blotter "10-4, suspicious vehicle at 123 Main St, plates ABC123"
@@ -87,6 +67,7 @@ python parallel_test1.py
 ```
 
 #### CLI Arguments
+
 | Argument | Description | Default |
 |----------|-------------|---------|
 | `--blotter` | Police blotter text input | Sample blotter |
@@ -95,36 +76,44 @@ python parallel_test1.py
 | `--safe-mode` | Enable enhanced disclaimers and certification | False |
 
 #### Pipeline Flow
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────────────┐
-│  Validate   │────▶│ Transcript  │────▶│ [Human Checkpoint]  │
-│   Input     │     │   Agent     │     │  Review transcript  │
-└─────────────┘     └─────────────┘     └──────────┬──────────┘
-                                                   ▼
-┌─────────────────────┐     ┌─────────────┐     ┌─────────────┐
-│ [Human Checkpoint]  │◀────│   Scene     │◀────│             │
-│  Review scenes      │     │  Breakdown  │     │             │
-└──────────┬──────────┘     └─────────────┘     └─────────────┘
-           ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Parallel Visual Agents (×3)                    │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐                  │
-│  │ Scene 1  │  │ Scene 2  │  │ Scene 3  │  (concurrent)    │
-│  └──────────┘  └──────────┘  └──────────┘                  │
-└──────────────────────────┬──────────────────────────────────┘
-                           ▼
-┌─────────────┐     ┌─────────────┐     ┌─────────────────────┐
-│  Synthesis  │────▶│   Critic    │────▶│ [Human Checkpoint]  │
-│   Agent     │     │   Agent     │     │  Final approval     │
-└─────────────┘     └─────────────┘     └──────────┬──────────┘
-                                                   ▼
-                                        ┌─────────────────────┐
-                                        │   Veo3 Video Gen    │
-                                        │   + Provenance      │
-                                        └─────────────────────┘
+
+```mermaid
+flowchart TD
+    subgraph Input
+        A[Validate Input]
+    end
+
+    subgraph Processing
+        B[Transcript Agent]
+        C[Scene Breakdown Agent]
+        D[Parallel Visual Agents ×3]
+        E[Synthesis Agent]
+        F[Critic Agent]
+    end
+
+    subgraph Checkpoints
+        H1[🔴 Human Checkpoint<br/>Review transcript]
+        H2[🔴 Human Checkpoint<br/>Review scenes]
+        H3[🔴 Human Checkpoint<br/>Final approval]
+    end
+
+    subgraph Output
+        G[Veo3 Video Gen<br/>+ Provenance]
+    end
+
+    A --> B --> H1 --> C --> H2 --> D
+    D --> E --> F --> H3 --> G
+
+    subgraph D[Parallel Visual Agents ×3]
+        direction LR
+        V1[Scene 1]
+        V2[Scene 2]
+        V3[Scene 3]
+    end
 ```
 
 #### Output Files
+
 ```
 videos/
 ├── SIMULATION_NOT_EVIDENCE_2025-12-06_143022_Case-GEN-abc123.mp4
@@ -140,6 +129,7 @@ videos/
 A streamlined single-pipeline tool that captures audio from YouTube live streams (like police scanners), transcribes it with Whisper, and generates reconstruction videos.
 
 #### Features
+
 - **YouTube Integration:** Downloads segments from live streams using `yt-dlp`
 - **Whisper Transcription:** Local speech-to-text with OpenAI Whisper
 - **Scene Parsing:** Regex-based extraction of police codes, locations, actions
@@ -147,6 +137,7 @@ A streamlined single-pipeline tool that captures audio from YouTube live streams
 - **Full Legal Compliance:** Same safeguards as parallel_test1.py
 
 #### Usage
+
 ```bash
 # Basic usage
 python blotter_reconstructor.py --url "https://youtube.com/watch?v=..." --duration 10
@@ -159,6 +150,7 @@ python blotter_reconstructor.py --url "..." --duration 5 --safe-mode
 ```
 
 #### CLI Arguments
+
 | Argument | Description | Default |
 |----------|-------------|---------|
 | `--url` | YouTube live stream URL (required) | - |
@@ -167,9 +159,17 @@ python blotter_reconstructor.py --url "..." --duration 5 --safe-mode
 | `--safe-mode` | Enable enhanced disclaimers | False |
 
 #### Pipeline Flow
-```
-YouTube URL → yt-dlp Download → Whisper Transcribe → [Confirm] 
-           → Parse Elements → [Confirm] → Veo3 Generate → [Confirm] → Save
+
+```mermaid
+flowchart LR
+    A[YouTube URL] --> B[yt-dlp Download]
+    B --> C[Whisper Transcribe]
+    C --> D[🔴 Confirm]
+    D --> E[Parse Elements]
+    E --> F[🔴 Confirm]
+    F --> G[Veo3 Generate]
+    G --> H[🔴 Confirm]
+    H --> I[Save]
 ```
 
 ---
@@ -181,17 +181,20 @@ YouTube URL → yt-dlp Download → Whisper Transcribe → [Confirm]
 A minimal example demonstrating the core async parallel pattern for batch LLM calls using `asyncio.gather()` with LiteLLM.
 
 #### Key Concepts Demonstrated
+
 ```python
 # The magic line - runs all tasks concurrently:
 results = await asyncio.gather(*[run_task(t) for t in tasks], return_exceptions=True)
 ```
 
 #### Usage
+
 ```bash
 python parallel_test0.py
 ```
 
 #### When to Use
+
 - Learning async patterns
 - Testing parallel LLM calls
 - Building custom batch processors
@@ -205,6 +208,7 @@ python parallel_test0.py
 A working example of the Google Veo3 video generation API. Use this as a reference for the correct API calling pattern.
 
 #### Key Pattern
+
 ```python
 from google import genai
 
@@ -230,6 +234,7 @@ generated_video.video.save("output.mp4")
 ## 🔧 Installation
 
 ### Prerequisites
+
 ```bash
 # Core dependencies
 pip install langgraph openai google-genai python-dotenv tqdm
@@ -245,7 +250,9 @@ pip install litellm
 ```
 
 ### Environment Variables
+
 Create a `.env` file:
+
 ```env
 OPENAI_API_KEY=sk-...
 GOOGLE_API_KEY=...  # For Veo3
@@ -268,21 +275,26 @@ All scripts include comprehensive legal safeguards:
 | **Safe Mode** | Enhanced disclaimers + signed certification |
 
 ### Output Filename Convention
-```
-SIMULATION_NOT_EVIDENCE_2025-12-06_143022_Case-12345.mp4
-└──────────┬──────────┘ └────┬────┘ └──┬──┘ └───┬───┘
-       Prefix           Date    Time   Case ID
-```
+
+| Component | Example | Description |
+|-----------|---------|-------------|
+| Prefix | `SIMULATION_NOT_EVIDENCE` | Fixed safety prefix |
+| Date | `2025-12-06` | Generation date |
+| Time | `143022` | Generation time (HHMMSS) |
+| Case ID | `Case-12345` | Identifier for the case |
+
+**Example:** `SIMULATION_NOT_EVIDENCE_2025-12-06_143022_Case-12345.mp4`
 
 ### Provenance Report Contents
+
 ```json
 {
   "report_type": "AI_RECONSTRUCTION_PROVENANCE",
   "session_id": "abc12345",
   "input_hash": "a1b2c3d4...",
   "output_hash": "e5f6g7h8...",
-  "user_acknowledgments": [...],
-  "events": [...],
+  "user_acknowledgments": ["..."],
+  "events": ["..."],
   "disclaimer": "This is an AI-generated reconstruction...",
   "ai_models_used": {
     "llm": "gpt-4o-mini",
@@ -296,7 +308,7 @@ SIMULATION_NOT_EVIDENCE_2025-12-06_143022_Case-12345.mp4
 ## 📊 Comparison Table
 
 | Feature | parallel_test1.py | blotter_reconstructor.py | parallel_test0.py |
-|---------|-------------------|--------------------------|-------------------|
+|---------|:-----------------:|:------------------------:|:-----------------:|
 | Multi-Agent | ✅ 6 agents | ❌ Single pipeline | ❌ None |
 | LangGraph | ✅ | ❌ | ❌ |
 | Parallel Execution | ✅ 3 concurrent | ❌ Sequential | ✅ Batch |
@@ -313,12 +325,14 @@ SIMULATION_NOT_EVIDENCE_2025-12-06_143022_Case-12345.mp4
 ## 🚀 Quick Start
 
 ### Option A: Text Input (parallel_test1.py)
+
 ```bash
 cd parallel_agents
 python parallel_test1.py --blotter "10-4, dispatch to all units. Suspicious vehicle at 123 Main St."
 ```
 
 ### Option B: YouTube Live Stream (blotter_reconstructor.py)
+
 ```bash
 cd parallel_agents
 python blotter_reconstructor.py --url "https://youtube.com/watch?v=..." --duration 10
@@ -328,17 +342,14 @@ python blotter_reconstructor.py --url "https://youtube.com/watch?v=..." --durati
 
 ## ⚠️ Important Legal Notice
 
-```
-╔═══════════════════════════════════════════════════════════════════════════════╗
-║                      THIS IS NOT REAL FOOTAGE                                 ║
-║                                                                               ║
-║   All generated content is AI-simulated for TRAINING PURPOSES ONLY.          ║
-║   NOT admissible as evidence in ANY court of law.                             ║
-║                                                                               ║
-║   Removing watermarks or using in legal proceedings violates the license      ║
-║   and may constitute FRAUD and OBSTRUCTION OF JUSTICE.                        ║
-╚═══════════════════════════════════════════════════════════════════════════════╝
-```
+> [!CAUTION]
+> **THIS IS NOT REAL FOOTAGE**
+>
+> All generated content is AI-simulated for **TRAINING PURPOSES ONLY**.
+> NOT admissible as evidence in ANY court of law.
+>
+> Removing watermarks or using in legal proceedings violates the license
+> and may constitute **FRAUD** and **OBSTRUCTION OF JUSTICE**.
 
 ---
 
@@ -346,19 +357,19 @@ python blotter_reconstructor.py --url "https://youtube.com/watch?v=..." --durati
 
 **Reconstruction-Only License v1.0**
 
-- ✅ Training and educational use
-- ✅ Internal hypothesis development
-- ❌ Use as evidence in legal proceedings
-- ❌ Removal of watermarks or disclaimers
-- ❌ Showing to witnesses, victims, or suspects without disclosure
+| Permitted | Prohibited |
+|-----------|------------|
+| ✅ Training and educational use | ❌ Use as evidence in legal proceedings |
+| ✅ Internal hypothesis development | ❌ Removal of watermarks or disclaimers |
+| | ❌ Showing to witnesses, victims, or suspects without disclosure |
 
 ---
 
 ## 🤝 Contributing
 
 When contributing, ensure all new features:
+
 1. Include appropriate legal disclaimers
 2. Log to the audit trail
 3. Require human confirmation for destructive actions
 4. Use safe filename conventions
-
