@@ -4,12 +4,34 @@
 > **Task-parallelized multi-agent crime-scene reconstruction system**  
 > One case → dozens of specialized AI agents running concurrently → auditable pre-vis + provenance in <60 seconds.
 
-┌────────────────────────────────────────────────────────────────────┐
-│   ⚠️ ALL OUTPUTS ARE AI-GENERATED SIMULATIONS FOR TRAINING &      │
-│   INTERNAL HYPOTHESIS DEVELOPMENT ONLY — NOT EVIDENCE              │
-└────────────────────────────────────────────────────────────────────┘
-
 A multi-agent system for generating educational crime reconstruction videos from police blotter text or radio logs using parallel AI processing.
+
+<br>
+
+<div align="center">
+
+<br>
+
+<div align="center">
+
+**⚠️ LEGAL & ETHICAL COMPLIANCE SUMMARY ⚠️**
+
+| Requirement                       | PARSEC Safeguard                                                                                 | Standard / Authority                     |
+|-----------------------------------|--------------------------------------------------------------------------------------------------|------------------------------------------|
+| **Purpose**                       | Training & internal hypothesis development **only**                                              | Non-evidentiary by design                |
+| **Court Admissibility**           | **NOT admissible as evidence** — ever                                                            | FRE 403 / Daubert / NIST IR 8401         |
+| **Visible Disclaimer**            | Permanent on-screen watermark + filename prefix `SIMULATION_NOT_EVIDENCE_`                       | Every frame & file                       |
+| **Provenance**                    | Full JSON audit trail with hashes, timestamps, model versions, user acknowledgments              | NIST AI RMF / ISO 42001                  |
+| **Human Oversight**               | 3 mandatory human-in-the-loop checkpoints                                                        | NIST AI RMF Govern 6.2                   |
+| **Bias & Sensitivity**            | Dedicated Critic Agent + safe-mode certification                                                 | NIST AI RMF Measure 2.9                  |
+| **Witness/Public Exposure**       | Prohibited — export locked until “Internal Use Only” affirmed                                    | Prevents memory contamination            |
+| **License**                       | Reconstruction-Only License v1.0 — removing disclaimers = misuse                                 | Custom restrictive license               |
+
+<strong>By using PARSEC you certify compliance with the above restrictions.</strong>
+
+</div>
+
+<br>
 
 ---
 
