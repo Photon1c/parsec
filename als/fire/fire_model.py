@@ -18,12 +18,14 @@ class FireSpreadModel:
         diffusion_coeff: float = 0.22,
         cooling_rate: float = 0.015,
         combustion_gain: float = 0.18,
+        burnout_rate: float = 0.035,
         damage_gain: float = 0.04,
         time_step_s: float = 1.0,
     ):
         self.diffusion_coeff = diffusion_coeff
         self.cooling_rate = cooling_rate
         self.combustion_gain = combustion_gain
+        self.burnout_rate = burnout_rate
         self.damage_gain = damage_gain
         self.time_step_s = time_step_s
 
@@ -43,6 +45,8 @@ class FireSpreadModel:
 
         heat = [[0.0 for _ in range(width)] for _ in range(height)]
         damage = [[0.0 for _ in range(width)] for _ in range(height)]
+        # Fuel depletes over time so heat can peak and decay.
+        fuel = [[max(0.0, min(1.0, material_map[y][x])) for x in range(width)] for y in range(height)]
 
         for iy, ix in ignition_points:
             if 0 <= iy < height and 0 <= ix < width:
@@ -57,11 +61,12 @@ class FireSpreadModel:
                     neighbors = self._neighbors(heat, x, y)
                     neighbor_avg = sum(neighbors) / len(neighbors) if neighbors else 0.0
                     diffusion = (neighbor_avg - local_heat) * self.diffusion_coeff
-                    burn_rate = max(0.0, min(1.0, material_map[y][x]))
+                    burn_rate = max(0.0, min(1.0, material_map[y][x])) * fuel[y][x]
                     combustion = burn_rate * local_heat * self.combustion_gain
 
                     updated = local_heat + diffusion + combustion - self.cooling_rate
                     next_heat[y][x] = max(0.0, min(1.0, updated))
+                    fuel[y][x] = max(0.0, fuel[y][x] - local_heat * self.burnout_rate)
 
             heat = next_heat
             for y in range(height):
@@ -73,6 +78,7 @@ class FireSpreadModel:
                     "t": round(step * self.time_step_s, 3),
                     "heat_grid": deepcopy(heat),
                     "damage_grid": deepcopy(damage),
+                    "fuel_grid": deepcopy(fuel),
                 }
             )
         return frames
