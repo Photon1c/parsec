@@ -18,6 +18,11 @@ A multi-agent system for generating educational crime reconstruction videos from
 ```
 parallel_agents/
 ├── parallel_test1.py      # 🏆 Main system - Full multi-agent pipeline with LangGraph
+├── als/                   # 🧪 Advanced Load Simulation layer
+│   ├── core/              # Deterministic simulation primitives
+│   ├── fire/              # Grid-based fire spread model (v1)
+│   ├── flood/             # Flood/load overstress model (v1)
+│   └── exporter/          # Three.js JSON exporters
 ├── blotter_reconstructor.py   # 📻 Simpler version - YouTube audio → Video
 ├── parallel_test0.py      # 📚 Reference - Basic async parallel pattern
 ├── video_gen.md           # 📖 Reference - Veo3 API usage example
@@ -36,17 +41,21 @@ The flagship implementation featuring a complete LangGraph-orchestrated multi-ag
 
 #### Features
 
-- **6 Specialized AI Agents:**
+- **10 Specialized AI Agents (including ALS branch):**
 
 | Agent | Purpose |
 |-------|---------|
 | **Transcript Agent** | Converts police codes (10-codes) into narrative dialogue |
 | **Scene Breakdown Agent** | Analyzes transcript and breaks into 3-5 key scenes |
+| **Scene Geometry Agent** | Builds normalized scene model with source/confidence fields |
+| **Hypothesis Generator Agent** | Produces 2-4 competing event hypotheses |
+| **Load Simulation Agent(s)** | Runs deterministic simulation per hypothesis in parallel |
+| **Hypothesis Consistency Agent** | Ranks hypothesis plausibility against constraints |
 | **Visual Reconstruction Agents** (×3) | Generate multi-angle visual prompts in parallel |
 | **Synthesis Agent** | Merges outputs into cohesive video script |
 | **Critic Agent** | Reviews for accuracy, sensitivity, and legal compliance |
 
-- **Parallel Processing:** Uses `asyncio` with semaphore-controlled concurrency (max 3 parallel visual agents)
+- **Parallel Processing:** Uses `asyncio` for visual fan-out (×3) and physics hypothesis fan-out
 - **Human-in-the-Loop:** 3 mandatory confirmation checkpoints
 - **Full Audit Trail:** JSON provenance reports with input/output hashes
 - **Legal Compliance:** License acceptance, watermarks, safe filenames
@@ -87,9 +96,13 @@ flowchart TD
     subgraph Processing
         B[Transcript Agent]
         C[Scene Breakdown Agent]
+        SG[Scene Geometry Agent]
+        HG[Hypothesis Generator Agent]
+        LS[Load Simulation Agent Fan-out]
+        HC[Hypothesis Consistency Agent]
         D[Parallel Visual Agents ×3]
-        E[Synthesis Agent]
-        F[Critic Agent]
+        E[Synthesis Agent + Physics Segment]
+        F[Critic Agent + Physics Review]
     end
 
     subgraph Checkpoints
@@ -102,7 +115,7 @@ flowchart TD
         G[Veo3 Video Gen<br/>+ Provenance]
     end
 
-    A --> B --> H1 --> C --> H2 --> D
+    A --> B --> H1 --> C --> H2 --> SG --> HG --> LS --> HC --> D
     D --> E --> F --> H3 --> G
 
     subgraph D[Parallel Visual Agents ×3]
@@ -120,6 +133,20 @@ videos/
 ├── SIMULATION_NOT_EVIDENCE_2025-12-06_143022_Case-GEN-abc123.mp4
 └── PROVENANCE_SIMULATION_2025-12-06_GEN-abc123_abc123.json
 ```
+
+### 1a. `als/` — Advanced Load Simulation Layer
+
+The new `/als` package provides a deterministic physics and environmental simulation abstraction that can evolve independently from the LangGraph orchestration code.
+
+| Module | Purpose |
+|--------|---------|
+| `als/scene_geometry_agent.py` | Normalizes incident geometry with `source` + `confidence` |
+| `als/hypothesis_agent.py` | Generates competing event hypotheses (`H1..H4`) |
+| `als/load_simulation_agent.py` | Runs ballistic/load simulation per hypothesis |
+| `als/hypothesis_consistency_agent.py` | Ranks simulation outputs and emits best-fit summary |
+| `als/fire/fire_model.py` | Grid-based fire spread starter model |
+| `als/flood/flood_model.py` | Flood pressure/load-overstress starter model |
+| `als/exporter/to_threejs_json.py` | Exports frame payloads for Three.js playback |
 
 ---
 
@@ -300,7 +327,14 @@ All scripts include comprehensive legal safeguards:
   "ai_models_used": {
     "llm": "gpt-4o-mini",
     "video": "veo-3.0-generate-001"
-  }
+  },
+  "simulation_engine": {
+    "name": "parsic_loadsim_v0.1",
+    "type": "rigid_body_approximation"
+  },
+  "hypotheses_considered": ["H1", "H2", "H3"],
+  "best_fit_hypothesis_id": "H2",
+  "average_constraint_error_m": 1.2
 }
 ```
 
@@ -310,9 +344,9 @@ All scripts include comprehensive legal safeguards:
 
 | Feature | parallel_test1.py | blotter_reconstructor.py | parallel_test0.py |
 |---------|:-----------------:|:------------------------:|:-----------------:|
-| Multi-Agent | ✅ 6 agents | ❌ Single pipeline | ❌ None |
+| Multi-Agent | ✅ 10 agents | ❌ Single pipeline | ❌ None |
 | LangGraph | ✅ | ❌ | ❌ |
-| Parallel Execution | ✅ 3 concurrent | ❌ Sequential | ✅ Batch |
+| Parallel Execution | ✅ Visual + hypothesis fan-outs | ❌ Sequential | ✅ Batch |
 | YouTube Input | ❌ | ✅ | ❌ |
 | Whisper | ❌ | ✅ | ❌ |
 | Veo3 Video Gen | ✅ | ✅ | ❌ |

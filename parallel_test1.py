@@ -34,6 +34,11 @@ from openai import AsyncOpenAI
 from tqdm import tqdm
 from google import genai
 
+from als.hypothesis_agent import HypothesisGeneratorAgent
+from als.hypothesis_consistency_agent import HypothesisConsistencyAgent
+from als.load_simulation_agent import LoadSimulationAgent
+from als.scene_geometry_agent import SceneGeometryAgent
+
 load_dotenv()
 
 # =============================================================================
@@ -144,6 +149,7 @@ class AuditTrail:
         self.user_acknowledgments = []
         self.input_hash = ""
         self.output_hash = ""
+        self.simulation_summary = {}
         
     def log_event(self, event_type: str, details: dict):
         """Log an auditable event."""
@@ -173,6 +179,10 @@ class AuditTrail:
         if os.path.exists(filepath):
             with open(filepath, 'rb') as f:
                 self.output_hash = hashlib.sha256(f.read()).hexdigest()[:16]
+
+    def set_simulation_summary(self, summary: dict):
+        """Attach simulation-specific metadata for provenance report."""
+        self.simulation_summary = summary or {}
                 
     def generate_provenance_report(self) -> dict:
         """Generate full provenance report for compliance."""
@@ -192,7 +202,16 @@ class AuditTrail:
             "ai_models_used": {
                 "llm": "gpt-4o-mini",
                 "video": "veo-3.0-generate-001"
-            }
+            },
+            "simulation_engine": self.simulation_summary.get("simulation_engine", {}),
+            "hypotheses_considered": self.simulation_summary.get("hypotheses_considered", []),
+            "best_fit_hypothesis_id": self.simulation_summary.get("best_fit_hypothesis_id"),
+            "average_constraint_error_m": self.simulation_summary.get("average_constraint_error_m"),
+            "constraint_errors": self.simulation_summary.get("constraint_errors", {}),
+            "simulation_warning": self.simulation_summary.get(
+                "simulation_warning",
+                "Physical simulations are approximate and NOT evidentiary.",
+            ),
         }
         
     def save_report(self, output_dir: str, case_id: str = "unknown"):
@@ -220,6 +239,13 @@ class ReconstructionState(TypedDict):
     case_id: str
     transcript: str
     scenes: list[dict]
+    scene_model: dict
+    simulation_scene_model: dict
+    hypotheses: list[dict]
+    simulation_results: list[dict]
+    hypothesis_ranking: dict
+    best_fit_hypothesis_id: str
+    physics_summary: dict
     visual_prompts: list[dict]
     video_script: dict
     critic_feedback: dict
@@ -577,8 +603,170 @@ async def scene_breakdown_agent(state: ReconstructionState, client: AsyncOpenAI)
     return {"scenes": scenes, "uncertainty_indicators": uncertainties, 
             "token_usage": state["token_usage"] + tokens}
 
+
+async def scene_geometry_agent(state: ReconstructionState, client: AsyncOpenAI,
+                               geometry_agent: SceneGeometryAgent) -> dict:
+    """Scene Geometry Agent: Builds normalized scene model with source/confidence metadata."""
+    logger.info("🧭 Scene Geometry Agent: Building normalized scene model...")
+    audit.log_event("agent_start", {"agent": "scene_geometry"})
+
+    user = f"""Blotter Input:
+{state['blotter_input'][:1200]}
+
+Transcript:
+{state['transcript'][:1600]}
+
+Scene Breakdown JSON:
+{json.dumps(state['scenes'], indent=2)[:2600]}
+
+Create a conservative geometry model with UNKNOWN markers for missing values."""
+
+    content, tokens = await call_llm(
+        client,
+        geometry_agent.SYSTEM_PROMPT,
+        user,
+        max_tokens=2200,
+    )
+
+    scene_model = geometry_agent.parse_response(content, state["scenes"])
+    simulation_scene_model = geometry_agent.to_simulation_model(scene_model)
+
+    audit.log_event(
+        "agent_complete",
+        {
+            "agent": "scene_geometry",
+            "entity_count": len(scene_model.get("entities", {})),
+            "token_count": tokens,
+        },
+    )
+
+    return {
+        "scene_model": scene_model,
+        "simulation_scene_model": simulation_scene_model,
+        "token_usage": state["token_usage"] + tokens,
+    }
+
+
+async def hypothesis_generator_agent(state: ReconstructionState, client: AsyncOpenAI,
+                                     hypothesis_agent: HypothesisGeneratorAgent) -> dict:
+    """Hypothesis Generator Agent: Creates competing timeline hypotheses."""
+    logger.info("🧠 Hypothesis Generator Agent: Producing competing hypotheses...")
+    audit.log_event("agent_start", {"agent": "hypothesis_generator"})
+
+    user = f"""Transcript:
+{state['transcript'][:1400]}
+
+Scene Model:
+{json.dumps(state['scene_model'], indent=2)[:2800]}
+
+Generate 2-4 materially different hypotheses."""
+
+    content, tokens = await call_llm(
+        client,
+        hypothesis_agent.SYSTEM_PROMPT,
+        user,
+        max_tokens=1800,
+    )
+    hypotheses = hypothesis_agent.parse_response(content)
+
+    audit.log_event(
+        "agent_complete",
+        {
+            "agent": "hypothesis_generator",
+            "hypothesis_count": len(hypotheses),
+            "token_count": tokens,
+        },
+    )
+    return {
+        "hypotheses": hypotheses,
+        "token_usage": state["token_usage"] + tokens,
+    }
+
+
+async def run_parallel_load_sim_agents(state: ReconstructionState,
+                                       load_agent: LoadSimulationAgent) -> dict:
+    """Load Simulation Agent fan-out: runs one simulation per hypothesis in parallel."""
+    hypotheses = state.get("hypotheses", [])
+    if not hypotheses:
+        return {"simulation_results": []}
+
+    logger.info(f"🧪 Load Simulation Agent: running {len(hypotheses)} hypothesis simulations...")
+    audit.log_event("agent_start", {"agent": "load_simulation", "hypotheses": len(hypotheses)})
+
+    scene_model = state.get("simulation_scene_model") or state.get("scene_model") or {}
+    tasks = [asyncio.to_thread(load_agent.run, scene_model, hypothesis) for hypothesis in hypotheses]
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    simulation_results: list[dict[str, Any]] = []
+    for hypothesis, result in zip(hypotheses, raw_results):
+        hypothesis_id = str(hypothesis.get("hypothesis_id", "UNKNOWN"))
+        if isinstance(result, Exception):
+            logger.error(f"Load simulation failed for {hypothesis_id}: {result}")
+            simulation_results.append(
+                {
+                    "hypothesis_id": hypothesis_id,
+                    "is_feasible": False,
+                    "constraint_errors": {"simulation_error": 999.0},
+                    "max_impact_force_n": 0.0,
+                    "trajectory": [],
+                    "plausibility_score": 0.0,
+                }
+            )
+            continue
+        simulation_results.append(result.to_dict())
+
+    ordering = {str(h.get("hypothesis_id", "")): idx for idx, h in enumerate(hypotheses)}
+    simulation_results.sort(key=lambda item: ordering.get(str(item.get("hypothesis_id", "")), 999))
+
+    feasible_count = sum(1 for result in simulation_results if result.get("is_feasible"))
+    audit.log_event(
+        "agent_complete",
+        {
+            "agent": "load_simulation",
+            "result_count": len(simulation_results),
+            "feasible_count": feasible_count,
+        },
+    )
+    return {"simulation_results": simulation_results}
+
+
+async def hypothesis_consistency_agent(state: ReconstructionState,
+                                       consistency_agent: HypothesisConsistencyAgent,
+                                       load_agent: LoadSimulationAgent) -> dict:
+    """Hypothesis Consistency Agent: ranks simulation outcomes and builds summary."""
+    logger.info("📊 Hypothesis Consistency Agent: Ranking simulation plausibility...")
+    audit.log_event("agent_start", {"agent": "hypothesis_consistency"})
+
+    ranking = consistency_agent.rank_hypotheses(
+        hypotheses=state.get("hypotheses", []),
+        simulation_results=state.get("simulation_results", []),
+        scene_model=state.get("scene_model", {}),
+    )
+
+    physics_summary = consistency_agent.summarize_for_provenance(
+        ranking=ranking,
+        simulation_results=state.get("simulation_results", []),
+        simulation_engine=load_agent.engine_metadata,
+    )
+    audit.set_simulation_summary(physics_summary)
+    audit.log_event(
+        "agent_complete",
+        {
+            "agent": "hypothesis_consistency",
+            "best_fit_hypothesis_id": ranking.get("best_fit_hypothesis_id"),
+            "ranked_count": len(ranking.get("hypothesis_scores", [])),
+        },
+    )
+
+    return {
+        "hypothesis_ranking": ranking,
+        "best_fit_hypothesis_id": ranking.get("best_fit_hypothesis_id", "UNKNOWN"),
+        "physics_summary": physics_summary,
+    }
+
 async def visual_reconstruction_agent(scene: dict, scene_idx: int, 
-                                       client: AsyncOpenAI, semaphore: asyncio.Semaphore) -> dict:
+                                       client: AsyncOpenAI, semaphore: asyncio.Semaphore,
+                                       physics_hint: str = "") -> dict:
     """Visual Reconstruction Agent with mandatory simulation labeling."""
     async with semaphore:
         logger.info(f"🎨 Visual Agent {scene_idx+1}: Processing '{scene.get('title', 'Scene')}'...")
@@ -609,6 +797,7 @@ async def visual_reconstruction_agent(scene: dict, scene_idx: int,
         Confidence Level: {scene.get('confidence_level', 'medium')}
         Uncertainty Notes: {scene.get('uncertainty_notes', 'None')}
         Target Duration: {scene.get('duration_seconds', 10)} seconds
+        Physics Context: {physics_hint or "No physics ranking available yet"}
         
         Remember: This is a TRAINING SIMULATION, not real footage."""
         
@@ -641,8 +830,26 @@ async def run_parallel_visual_agents(state: ReconstructionState, client: AsyncOp
     
     semaphore = asyncio.Semaphore(3)
     
+    best_hypothesis_id = state.get("best_fit_hypothesis_id")
+    best_ranked = next(
+        (item for item in state.get("hypothesis_ranking", {}).get("hypothesis_scores", [])
+         if item.get("id") == best_hypothesis_id),
+        None,
+    )
+    best_hypothesis = next(
+        (item for item in state.get("hypotheses", [])
+         if item.get("hypothesis_id") == best_hypothesis_id),
+        {},
+    )
+    physics_hint = ""
+    if best_hypothesis_id:
+        physics_hint = (
+            f"In one plausible scenario (not evidence), {best_hypothesis.get('label', 'unknown scenario')} "
+            f"[ID={best_hypothesis_id}, score={best_ranked.get('score', 'n/a') if best_ranked else 'n/a'}]."
+        )
+
     tasks = [
-        visual_reconstruction_agent(scene, idx, client, semaphore)
+        visual_reconstruction_agent(scene, idx, client, semaphore, physics_hint=physics_hint)
         for idx, scene in enumerate(state["scenes"])
     ]
     
@@ -665,7 +872,8 @@ async def synthesis_agent(state: ReconstructionState, client: AsyncOpenAI) -> di
     audit.log_event("agent_start", {"agent": "synthesis"})
     
     system = f"""You are a video production coordinator for TRAINING SIMULATIONS.
-    Combine scene breakdowns and visual prompts into a unified video script.
+    Combine scene breakdowns, visual prompts, and physics plausibility rankings
+    into a unified video script.
     
     Output JSON:
     {{
@@ -694,15 +902,25 @@ async def synthesis_agent(state: ReconstructionState, client: AsyncOpenAI) -> di
             "not_admissible": true,
             "generation_timestamp": "{GENERATION_TIMESTAMP}",
             "session_id": "{SESSION_ID}"
+        }},
+        "physics_consistency": {{
+            "best_fit_hypothesis_id": "H?",
+            "language_guidance": "Use wording: In one plausible scenario (not evidence)...",
+            "summary": "brief description of constraint fit and uncertainty"
         }}
     }}
     
-    CRITICAL: Every scene MUST include "SIMULATION" or "RECONSTRUCTION" in annotations."""
+    CRITICAL:
+    - Every scene MUST include "SIMULATION" or "RECONSTRUCTION" in annotations.
+    - Narration must avoid certainty and use hypothesis framing."""
     
     user = f"""Transcript: {state['transcript'][:1000]}
     Scenes: {json.dumps(state['scenes'], indent=2)[:2000]}
     Visual Prompts: {json.dumps(state['visual_prompts'], indent=2)[:3000]}
-    Uncertainties: {json.dumps(state['uncertainty_indicators'], indent=2)}"""
+    Uncertainties: {json.dumps(state['uncertainty_indicators'], indent=2)}
+    Best Hypothesis ID: {state.get('best_fit_hypothesis_id', 'UNKNOWN')}
+    Hypothesis Ranking: {json.dumps(state.get('hypothesis_ranking', {}), indent=2)[:1800]}
+    Simulation Results: {json.dumps(state.get('simulation_results', []), indent=2)[:1800]}"""
     
     content, tokens = await call_llm(client, system, user, max_tokens=3000)
     
@@ -741,6 +959,9 @@ async def critic_agent(state: ReconstructionState, client: AsyncOpenAI) -> dict:
        - Could this be mistaken for real footage?
     4. EDUCATIONAL VALUE: Informative and appropriate?
     5. UNCERTAINTY: Are speculative elements clearly marked?
+    6. PHYSICS PLAUSIBILITY: Does script language align with simulation ranking?
+       - Uses "plausible scenario" wording, not factual certainty
+       - Avoids overclaiming force/impact details
     
     Output JSON:
     {{
@@ -750,6 +971,7 @@ async def critic_agent(state: ReconstructionState, client: AsyncOpenAI) -> dict:
         "sensitivity_flags": [],
         "legal_concerns": [],
         "missing_disclaimers": [],
+        "physics_concerns": [],
         "suggestions": [],
         "requires_human_review": boolean,
         "review_summary": "summary",
@@ -760,6 +982,7 @@ async def critic_agent(state: ReconstructionState, client: AsyncOpenAI) -> dict:
     
     user = f"""Original Blotter: {state['blotter_input']}
     Video Script: {json.dumps(state['video_script'], indent=2)[:4000]}
+    Physics Ranking: {json.dumps(state.get('hypothesis_ranking', {}), indent=2)[:1800]}
     Sensitivity Pre-Check: {json.dumps(sensitivity)}"""
     
     content, tokens = await call_llm(client, system, user, max_tokens=1000)
@@ -872,6 +1095,10 @@ def create_workflow(output_dir: str, safe_mode: bool = False, training_mode: boo
     """Create the LangGraph workflow with all safety checkpoints."""
     
     openai_client = AsyncOpenAI()
+    geometry_llm_agent = SceneGeometryAgent()
+    hypothesis_llm_agent = HypothesisGeneratorAgent()
+    load_sim_agent = LoadSimulationAgent(time_step=0.01, max_time=3.0)
+    consistency_ranker = HypothesisConsistencyAgent()
     
     async def validate_node(state: ReconstructionState) -> ReconstructionState:
         valid, error = validate_blotter(state["blotter_input"])
@@ -924,6 +1151,47 @@ def create_workflow(output_dir: str, safe_mode: bool = False, training_mode: boo
         if not accepted:
             state["error"] = "User rejected scene breakdown"
         return state
+
+    async def scene_geometry_node(state: ReconstructionState) -> ReconstructionState:
+        if state.get("error"):
+            return state
+        result = await scene_geometry_agent(state, openai_client, geometry_llm_agent)
+        state.update(result)
+        return state
+
+    async def hypothesis_node(state: ReconstructionState) -> ReconstructionState:
+        if state.get("error"):
+            return state
+        result = await hypothesis_generator_agent(state, openai_client, hypothesis_llm_agent)
+        state.update(result)
+        return state
+
+    async def load_sim_node(state: ReconstructionState) -> ReconstructionState:
+        if state.get("error"):
+            return state
+        result = await run_parallel_load_sim_agents(state, load_sim_agent)
+        state.update(result)
+        return state
+
+    async def consistency_node(state: ReconstructionState) -> ReconstructionState:
+        if state.get("error"):
+            return state
+        result = await hypothesis_consistency_agent(state, consistency_ranker, load_sim_agent)
+        state.update(result)
+
+        ranking = state.get("hypothesis_ranking", {})
+        if ranking.get("hypothesis_scores"):
+            print("\n🧪 PHYSICS HYPOTHESIS RANKING:")
+            for item in ranking["hypothesis_scores"]:
+                print(
+                    f"   • {item.get('id')}: score={item.get('score')} | "
+                    f"feasible={item.get('is_feasible')} | {item.get('description')}"
+                )
+            print(f"   Best fit: {state.get('best_fit_hypothesis_id', 'UNKNOWN')}")
+            warning = ranking.get("simulation_not_evidence")
+            if warning:
+                print(f"\n   ⚠️  {warning}")
+        return state
     
     async def visual_node(state: ReconstructionState) -> ReconstructionState:
         if state.get("error"):
@@ -954,6 +1222,8 @@ def create_workflow(output_dir: str, safe_mode: bool = False, training_mode: boo
             print(f"\n⚖️  LEGAL CONCERNS: {feedback['legal_concerns']}")
         if feedback.get("missing_disclaimers"):
             print(f"\n📋 MISSING DISCLAIMERS: {feedback['missing_disclaimers']}")
+        if feedback.get("physics_concerns"):
+            print(f"\n🧪 PHYSICS CONCERNS: {feedback['physics_concerns']}")
             
         print(f"\n📋 CRITIC REVIEW:")
         print(f"   Recommendation: {feedback.get('recommendation', 'unknown').upper()}")
@@ -990,6 +1260,11 @@ def create_workflow(output_dir: str, safe_mode: bool = False, training_mode: boo
         print(f"   Video generation: ~1-2 min additional")
         print(f"   Case ID: {state['case_id']}")
         print(f"   Output filename: {generate_safe_filename(state['case_id'], state.get('safe_mode', False))}")
+        if state.get("best_fit_hypothesis_id"):
+            print(f"   Best-fit hypothesis: {state.get('best_fit_hypothesis_id')}")
+        avg_constraint_error = state.get("physics_summary", {}).get("average_constraint_error_m")
+        if avg_constraint_error is not None:
+            print(f"   Avg physics constraint error: {avg_constraint_error} m")
         print('='*60)
         print("\n⚠️  FINAL REMINDER:")
         print("   The generated video is a SIMULATION for training only.")
@@ -1019,6 +1294,10 @@ def create_workflow(output_dir: str, safe_mode: bool = False, training_mode: boo
     workflow.add_node("confirm_transcript", confirm_transcript_node)
     workflow.add_node("breakdown", breakdown_node)
     workflow.add_node("confirm_scenes", confirm_scenes_node)
+    workflow.add_node("scene_geometry", scene_geometry_node)
+    workflow.add_node("hypothesis", hypothesis_node)
+    workflow.add_node("load_sim", load_sim_node)
+    workflow.add_node("consistency", consistency_node)
     workflow.add_node("visual", visual_node)
     workflow.add_node("synthesis", synthesis_node)
     workflow.add_node("critic", critic_node)
@@ -1030,7 +1309,11 @@ def create_workflow(output_dir: str, safe_mode: bool = False, training_mode: boo
     workflow.add_edge("transcript", "confirm_transcript")
     workflow.add_edge("confirm_transcript", "breakdown")
     workflow.add_edge("breakdown", "confirm_scenes")
-    workflow.add_edge("confirm_scenes", "visual")
+    workflow.add_edge("confirm_scenes", "scene_geometry")
+    workflow.add_edge("scene_geometry", "hypothesis")
+    workflow.add_edge("hypothesis", "load_sim")
+    workflow.add_edge("load_sim", "consistency")
+    workflow.add_edge("consistency", "visual")
     workflow.add_edge("visual", "synthesis")
     workflow.add_edge("synthesis", "critic")
     workflow.add_edge("critic", "confirm_video")
@@ -1069,6 +1352,13 @@ async def run_reconstruction(blotter: str, output_dir: str,
         "case_id": case_id,
         "transcript": "",
         "scenes": [],
+        "scene_model": {},
+        "simulation_scene_model": {},
+        "hypotheses": [],
+        "simulation_results": [],
+        "hypothesis_ranking": {},
+        "best_fit_hypothesis_id": "",
+        "physics_summary": {},
         "visual_prompts": [],
         "video_script": {},
         "critic_feedback": {},
