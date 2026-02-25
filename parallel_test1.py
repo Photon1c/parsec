@@ -683,6 +683,93 @@ Generate 2-4 materially different hypotheses."""
     }
 
 
+def _as_float(value: Any, default: float | None = None) -> float | None:
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_vec3(value: Any, default: list[float]) -> list[float]:
+    if not isinstance(value, list) or len(value) < 3:
+        return default.copy()
+    vec: list[float] = []
+    for idx, fallback in enumerate(default):
+        try:
+            vec.append(float(value[idx]))
+        except (TypeError, ValueError, IndexError):
+            vec.append(float(fallback))
+    return vec
+
+
+def _attach_als_sidecar_to_hypotheses(
+    hypotheses: list[dict[str, Any]],
+    scene_model: dict[str, Any],
+    load_agent: LoadSimulationAgent,
+) -> tuple[list[dict[str, Any]], int]:
+    """
+    Lightweight sidecar hook for hypothesis records.
+
+    If a hypothesis includes relative_velocity_mps + impact_angle_deg, run a
+    single deterministic projectile pass and attach summary metrics.
+    """
+    entities = scene_model.get("entities", {})
+    environment = scene_model.get("environment", {})
+
+    rider = entities.get("rider", {}) if isinstance(entities, dict) else {}
+    mass_kg = _as_float(rider.get("mass_kg"), 80.0) or 80.0
+    initial_position = _as_vec3(rider.get("initial_position"), [0.0, 0.0, 1.0])
+    base_velocity = _as_vec3(rider.get("initial_velocity"), [0.0, 0.0, 0.0])
+
+    gravity = _as_float(environment.get("gravity"), 9.81) or 9.81
+    barrier_x = _as_float(environment.get("barrier_x_m"), None)
+    barrier_height = _as_float(environment.get("barrier_height_m"), None)
+    ground_z = _as_float(environment.get("ground_z_m"), 0.0) or 0.0
+
+    enriched: list[dict[str, Any]] = []
+    sidecar_count = 0
+    for hypothesis in hypotheses:
+        h = dict(hypothesis)
+        params = h.get("parameters", {}) if isinstance(h.get("parameters"), dict) else {}
+        rel_vel = params.get("relative_velocity_mps")
+        impact_angle = params.get("impact_angle_deg")
+        if rel_vel is None or impact_angle is None:
+            h["als_sidecar"] = {
+                "enabled": False,
+                "reason": "Missing parameters.relative_velocity_mps or parameters.impact_angle_deg",
+            }
+            enriched.append(h)
+            continue
+
+        launch_velocity = load_agent._velocity_from_hypothesis(h) or base_velocity
+        trace = load_agent.engine.simulate_projectile(
+            mass_kg=mass_kg,
+            initial_position=initial_position,
+            initial_velocity=launch_velocity,
+            gravity=gravity,
+            barrier_x_m=barrier_x,
+            barrier_height_m=barrier_height,
+            barrier_restitution=0.25,
+            ground_z_m=ground_z,
+        )
+        sidecar_count += 1
+        h["als_sidecar"] = {
+            "enabled": True,
+            "engine_metadata": load_agent.engine_metadata,
+            "summary": {
+                "max_impact_force_n": round(trace.max_impact_force_n, 3),
+                "max_speed_mps": round(trace.max_speed_mps, 3),
+                "barrier_contact": trace.barrier_contact,
+                "ground_impact_time_s": trace.ground_impact_time_s,
+                "impact_point": [round(float(v), 4) for v in trace.impact_point],
+            },
+        }
+        enriched.append(h)
+    return enriched, sidecar_count
+
+
 async def run_parallel_load_sim_agents(state: ReconstructionState,
                                        load_agent: LoadSimulationAgent) -> dict:
     """Load Simulation Agent fan-out: runs one simulation per hypothesis in parallel."""
@@ -694,11 +781,16 @@ async def run_parallel_load_sim_agents(state: ReconstructionState,
     audit.log_event("agent_start", {"agent": "load_simulation", "hypotheses": len(hypotheses)})
 
     scene_model = state.get("simulation_scene_model") or state.get("scene_model") or {}
-    tasks = [asyncio.to_thread(load_agent.run, scene_model, hypothesis) for hypothesis in hypotheses]
+    enriched_hypotheses, sidecar_count = _attach_als_sidecar_to_hypotheses(
+        [dict(h) for h in hypotheses],
+        scene_model,
+        load_agent,
+    )
+    tasks = [asyncio.to_thread(load_agent.run, scene_model, hypothesis) for hypothesis in enriched_hypotheses]
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)
 
     simulation_results: list[dict[str, Any]] = []
-    for hypothesis, result in zip(hypotheses, raw_results):
+    for hypothesis, result in zip(enriched_hypotheses, raw_results):
         hypothesis_id = str(hypothesis.get("hypothesis_id", "UNKNOWN"))
         if isinstance(result, Exception):
             logger.error(f"Load simulation failed for {hypothesis_id}: {result}")
@@ -715,7 +807,7 @@ async def run_parallel_load_sim_agents(state: ReconstructionState,
             continue
         simulation_results.append(result.to_dict())
 
-    ordering = {str(h.get("hypothesis_id", "")): idx for idx, h in enumerate(hypotheses)}
+    ordering = {str(h.get("hypothesis_id", "")): idx for idx, h in enumerate(enriched_hypotheses)}
     simulation_results.sort(key=lambda item: ordering.get(str(item.get("hypothesis_id", "")), 999))
 
     feasible_count = sum(1 for result in simulation_results if result.get("is_feasible"))
@@ -725,9 +817,10 @@ async def run_parallel_load_sim_agents(state: ReconstructionState,
             "agent": "load_simulation",
             "result_count": len(simulation_results),
             "feasible_count": feasible_count,
+            "sidecar_attached_count": sidecar_count,
         },
     )
-    return {"simulation_results": simulation_results}
+    return {"simulation_results": simulation_results, "hypotheses": enriched_hypotheses}
 
 
 async def hypothesis_consistency_agent(state: ReconstructionState,

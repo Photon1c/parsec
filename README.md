@@ -23,6 +23,9 @@ parallel_agents/
 │   ├── fire/              # Grid-based fire spread model (v1)
 │   ├── flood/             # Flood/load overstress model (v1)
 │   └── exporter/          # Three.js JSON exporters
+├── als_demo_export.py     # 🔁 Generates demo ALS JSON artifacts
+├── tests/
+│   └── test_als_models.py # ✅ Minimal ALS model/schema tests
 ├── blotter_reconstructor.py   # 📻 Simpler version - YouTube audio → Video
 ├── parallel_test0.py      # 📚 Reference - Basic async parallel pattern
 ├── video_gen.md           # 📖 Reference - Veo3 API usage example
@@ -56,6 +59,7 @@ The flagship implementation featuring a complete LangGraph-orchestrated multi-ag
 | **Critic Agent** | Reviews for accuracy, sensitivity, and legal compliance |
 
 - **Parallel Processing:** Uses `asyncio` for visual fan-out (×3) and physics hypothesis fan-out
+- **ALS Sidecar Summaries:** When hypotheses include impact angle + relative velocity, deterministic load summaries are attached to each hypothesis record
 - **Human-in-the-Loop:** 3 mandatory confirmation checkpoints
 - **Full Audit Trail:** JSON provenance reports with input/output hashes
 - **Legal Compliance:** License acceptance, watermarks, safe filenames
@@ -147,6 +151,56 @@ The new `/als` package provides a deterministic physics and environmental simula
 | `als/fire/fire_model.py` | Grid-based fire spread starter model |
 | `als/flood/flood_model.py` | Flood pressure/load-overstress starter model |
 | `als/exporter/to_threejs_json.py` | Exports frame payloads for Three.js playback |
+
+#### ALS Demo Artifact Export (canonical Three.js input)
+
+```bash
+# Writes:
+#   output/als_demo_fire.json
+#   output/als_demo_flood.json
+# And canonical exports:
+#   als_exports/demo-case/fire.json
+#   als_exports/demo-case/flood.json
+python3 als_demo_export.py
+```
+
+#### Locked Three.js JSON Schema (v1)
+
+Top-level envelope produced by `to_threejs_json(...)`:
+
+```json
+{
+  "schema": "als.threejs.v1",
+  "scenario_type": "fire",
+  "coordinate_system": "local_meters",
+  "metadata": {
+    "demo": true,
+    "model": "FireSpreadModel"
+  },
+  "frame_count": 2,
+  "frames": [
+    {
+      "t": 0.0,
+      "heat_grid": [[0.0, 0.2], [0.4, 1.0]],
+      "damage_grid": [[0.0, 0.0], [0.0, 0.1]],
+      "fuel_grid": [[1.0, 0.9], [0.8, 0.7]]
+    },
+    {
+      "t": 1.0,
+      "heat_grid": [[0.1, 0.3], [0.5, 0.9]],
+      "damage_grid": [[0.0, 0.0], [0.1, 0.2]],
+      "fuel_grid": [[0.95, 0.85], [0.75, 0.6]]
+    }
+  ],
+  "warning": "Simulation output is approximate and for educational/internal hypothesis development only. NOT evidentiary."
+}
+```
+
+Canonical loader path convention for Tronverse / Three.js:
+
+```text
+/als_exports/<case_id>/<scenario_type>.json
+```
 
 ---
 
